@@ -1,12 +1,25 @@
 import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, FileText, Loader2, Upload } from "lucide-react";
+import { Check, FileText, Loader2, Trash2, Upload, X } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  clearTimetable,
   confirmQuestion,
   hasParsedOutline,
   hasParsedTimetable,
+  removeCourse,
   uploadDocument,
   type ApiError,
   type ConfirmationQuestion,
@@ -118,6 +131,75 @@ function UploadButton({ kind, label }: { kind: UploadKind; label: string }) {
   );
 }
 
+function RemoveCourseButton({ index }: { index: number }) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: () => removeCourse(index),
+    onSuccess: ({ state }) => {
+      queryClient.setQueryData(["state"], state);
+      queryClient.invalidateQueries({ queryKey: ["grid"] });
+    },
+  });
+
+  return (
+    <button
+      type="button"
+      aria-label="Remove this course outline"
+      className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+      disabled={mutation.isPending}
+      onClick={() => mutation.mutate()}
+    >
+      {mutation.isPending ? (
+        <Loader2 className="size-3.5 animate-spin" strokeWidth={2} />
+      ) : (
+        <X className="size-3.5" strokeWidth={2.5} />
+      )}
+    </button>
+  );
+}
+
+function ClearTimetableButton() {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: () => clearTimetable(),
+    onSuccess: ({ state }) => {
+      queryClient.setQueryData(["state"], state);
+      queryClient.invalidateQueries({ queryKey: ["grid"] });
+    },
+  });
+
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-muted-foreground">
+          <Trash2 className="size-3.5" strokeWidth={2} />
+          Clear
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Clear the uploaded timetable?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This removes every parsed timetable day, division, and minor cohort, and any open
+            confirmation questions (they all originate from the timetable). Course outlines are not
+            affected. You can re-upload the correct timetable right after.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+            {mutation.isPending ? (
+              <Loader2 className="size-3.5 animate-spin" strokeWidth={2} />
+            ) : (
+              "Clear timetable"
+            )}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export function InputsPanel({ state, onGenerate }: Props) {
   const timetableParsed = hasParsedTimetable(state);
   const outlinesParsed = hasParsedOutline(state);
@@ -150,6 +232,9 @@ export function InputsPanel({ state, onGenerate }: Props) {
             <p className="text-xs font-semibold">
               {dayCount} day{dayCount === 1 ? "" : "s"} processed
             </p>
+            <div className="ml-auto">
+              <ClearTimetableButton />
+            </div>
           </div>
         )}
         <UploadButton
@@ -173,6 +258,7 @@ export function InputsPanel({ state, onGenerate }: Props) {
                 <FileText className="size-3.5 text-muted-foreground" strokeWidth={2} />
                 <span className="truncate font-medium">{course.name}</span>
                 <Check className="ml-auto size-3.5 shrink-0 text-success" strokeWidth={2.5} />
+                <RemoveCourseButton index={i} />
               </li>
             ))}
           </ul>

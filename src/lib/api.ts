@@ -345,6 +345,14 @@ export async function uploadDocument(
   return requestAndMirror<UploadResult>("/upload", { method: "POST", body: form });
 }
 
+export async function removeCourse(index: number): Promise<Mirrored<StatusResult>> {
+  return requestAndMirror<StatusResult>(`/course/${index}`, { method: "DELETE" });
+}
+
+export async function clearTimetable(): Promise<Mirrored<StatusResult>> {
+  return requestAndMirror<StatusResult>("/timetable", { method: "DELETE" });
+}
+
 export async function confirmQuestion(
   context: string,
   resolution: string,

@@ -7,7 +7,8 @@ schedule an assessment, review ranked candidates with reasons, approve one,
 and see it land on the timetable grid.
 
 This is a pure client -- all scheduling logic, parsing, and chat live in a
-separate backend ([ai-evaluation-scheduler-backend](https://github.com/)),
+separate backend
+([ai-evaluation-scheduler-backend](https://github.com/khandelwalhim-maker/ai-evaluation-scheduler-backend)),
 called cross-origin.
 
 ## Running locally

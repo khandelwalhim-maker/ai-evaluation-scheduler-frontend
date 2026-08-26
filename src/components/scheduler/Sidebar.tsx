@@ -1,9 +1,13 @@
 import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CalendarRange, Download, Loader2, Upload } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { CalendarRange, Download, Loader2, Settings2, Upload } from "lucide-react";
 import { downloadBlob, exportState, importState, type ApiError } from "@/lib/api";
 
-const items = [{ label: "Evaluation Scheduler", icon: CalendarRange, active: true }];
+const items = [
+  { label: "Evaluation Scheduler", icon: CalendarRange, to: "/" as const },
+  { label: "Developer Options", icon: Settings2, to: "/developer" as const },
+];
 
 export function AppSidebar() {
   const queryClient = useQueryClient();
@@ -35,19 +39,15 @@ export function AppSidebar() {
         </div>
       </div>
       <nav className="flex flex-col gap-1 p-4">
-        {items.map(({ label, icon: Icon, active }) => (
-          <button
+        {items.map(({ label, icon: Icon, to }) => (
+          <Link
             key={label}
-            type="button"
-            className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-              active
-                ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
-                : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-            }`}
+            to={to}
+            className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[status=active]:bg-sidebar-primary data-[status=active]:text-sidebar-primary-foreground data-[status=active]:shadow-sm"
           >
             <Icon className="size-4" strokeWidth={2} />
             {label}
-          </button>
+          </Link>
         ))}
       </nav>
 

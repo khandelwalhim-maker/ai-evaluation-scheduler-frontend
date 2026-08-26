@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, FileText, Loader2, Trash2, Upload, X } from "lucide-react";
+import { Check, Download, FileText, Loader2, Plus, Trash2, Upload, X } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,12 +15,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  clearCourseRegistry,
   clearTimetable,
   confirmQuestion,
+  downloadBlob,
+  downloadCourseRegistryTemplate,
   hasParsedOutline,
   hasParsedTimetable,
   removeCourse,
+  removeCourseRegistryEntry,
+  uploadCourseRegistry,
   uploadDocument,
+  upsertCourseRegistryEntry,
   type ApiError,
   type ConfirmationQuestion,
   type SessionStateDTO,
@@ -200,6 +206,271 @@ function ClearTimetableButton() {
   );
 }
 
+function DownloadTemplateButtons() {
+  const [error, setError] = useState<string | null>(null);
+  const [pendingFormat, setPendingFormat] = useState<"csv" | "xlsx" | null>(null);
+
+  const download = async (format: "csv" | "xlsx") => {
+    setError(null);
+    setPendingFormat(format);
+    try {
+      const { blob, filename } = await downloadCourseRegistryTemplate(format);
+      downloadBlob(blob, filename);
+    } catch (err) {
+      setError((err as ApiError).message ?? "Download failed");
+    } finally {
+      setPendingFormat(null);
+    }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex gap-1.5">
+        <Button
+          variant="outline"
+          size="sm"
+          className="flex-1"
+          disabled={pendingFormat !== null}
+          onClick={() => download("csv")}
+        >
+          {pendingFormat === "csv" ? (
+            <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          ) : (
+            <Download className="size-4" strokeWidth={2} />
+          )}
+          Template (CSV)
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="flex-1"
+          disabled={pendingFormat !== null}
+          onClick={() => download("xlsx")}
+        >
+          {pendingFormat === "xlsx" ? (
+            <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          ) : (
+            <Download className="size-4" strokeWidth={2} />
+          )}
+          Template (.xlsx)
+        </Button>
+      </div>
+      {error && <p className="text-[11px] text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+function RegistryUploadButton() {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: uploadCourseRegistry,
+    onSuccess: ({ data, state }) => {
+      setError(null);
+      queryClient.setQueryData(["state"], state);
+      const collapsed = data.summary.rows_collapsed;
+      setNotice(
+        collapsed && collapsed.length > 0
+          ? `${collapsed.join(", ")} appeared more than once in the upload — kept the last value.`
+          : null,
+      );
+    },
+    onError: (err) => {
+      setNotice(null);
+      setError((err as ApiError).message ?? "Upload failed");
+    },
+  });
+
+  return (
+    <div className="space-y-1.5">
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".csv,.xlsx"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) mutation.mutate(file);
+        }}
+      />
+      <Button
+        variant="outline"
+        size="sm"
+        className="w-full"
+        disabled={mutation.isPending}
+        onClick={() => inputRef.current?.click()}
+      >
+        {mutation.isPending ? (
+          <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+        ) : (
+          <Upload className="size-4" strokeWidth={2} />
+        )}
+        Upload Filled Template
+      </Button>
+      {error && <p className="text-[11px] text-destructive">{error}</p>}
+      {notice && <p className="text-[11px] text-muted-foreground">{notice}</p>}
+    </div>
+  );
+}
+
+function RegistryRow({ abbreviation, courseName }: { abbreviation: string; courseName: string }) {
+  const [name, setName] = useState(courseName);
+  const queryClient = useQueryClient();
+  const dirty = name.trim() !== courseName && name.trim().length > 0;
+
+  const saveMutation = useMutation({
+    mutationFn: () => upsertCourseRegistryEntry(abbreviation, name.trim()),
+    onSuccess: ({ state }) => queryClient.setQueryData(["state"], state),
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: () => removeCourseRegistryEntry(abbreviation),
+    onSuccess: ({ state }) => queryClient.setQueryData(["state"], state),
+  });
+
+  return (
+    <li className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1.5">
+      <span
+        className="w-20 shrink-0 truncate text-xs font-semibold text-foreground"
+        title={abbreviation}
+      >
+        {abbreviation}
+      </span>
+      <Input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        className="h-7 flex-1 text-xs"
+      />
+      {dirty && (
+        <Button
+          size="sm"
+          className="h-7 shrink-0 px-2 text-[11px]"
+          onClick={() => saveMutation.mutate()}
+          disabled={saveMutation.isPending}
+        >
+          {saveMutation.isPending ? <Loader2 className="size-3 animate-spin" /> : "Save"}
+        </Button>
+      )}
+      <button
+        type="button"
+        aria-label={`Remove ${abbreviation} from the course registry`}
+        className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+        disabled={removeMutation.isPending}
+        onClick={() => removeMutation.mutate()}
+      >
+        {removeMutation.isPending ? (
+          <Loader2 className="size-3.5 animate-spin" strokeWidth={2} />
+        ) : (
+          <X className="size-3.5" strokeWidth={2.5} />
+        )}
+      </button>
+    </li>
+  );
+}
+
+function AddRegistryEntryForm() {
+  const [abbreviation, setAbbreviation] = useState("");
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: () => upsertCourseRegistryEntry(abbreviation.trim(), name.trim()),
+    onSuccess: ({ state }) => {
+      queryClient.setQueryData(["state"], state);
+      setAbbreviation("");
+      setName("");
+      setError(null);
+    },
+    onError: (err) => setError((err as ApiError).message ?? "Could not add that mapping"),
+  });
+
+  return (
+    <form
+      className="space-y-1.5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (abbreviation.trim() && name.trim()) mutation.mutate();
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <Input
+          value={abbreviation}
+          onChange={(e) => setAbbreviation(e.target.value)}
+          placeholder="Code (e.g. EAB)"
+          className="h-7 w-28 shrink-0 text-xs"
+          disabled={mutation.isPending}
+        />
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Course name"
+          className="h-7 flex-1 text-xs"
+          disabled={mutation.isPending}
+        />
+        <Button
+          type="submit"
+          size="sm"
+          className="h-7 shrink-0 px-2.5 text-xs"
+          disabled={mutation.isPending || !abbreviation.trim() || !name.trim()}
+        >
+          {mutation.isPending ? (
+            <Loader2 className="size-3.5 animate-spin" strokeWidth={2} />
+          ) : (
+            <Plus className="size-3.5" strokeWidth={2.5} />
+          )}
+          Add
+        </Button>
+      </div>
+      {error && <p className="text-[11px] text-destructive">{error}</p>}
+    </form>
+  );
+}
+
+function ClearRegistryButton() {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: () => clearCourseRegistry(),
+    onSuccess: ({ state }) => {
+      queryClient.setQueryData(["state"], state);
+    },
+  });
+
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-muted-foreground">
+          <Trash2 className="size-3.5" strokeWidth={2} />
+          Clear
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Clear the course registry?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This removes every abbreviation-to-course mapping you've uploaded. Timetable entries
+            already resolved keep their resolved name — only future uploads lose the mapping.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+            {mutation.isPending ? (
+              <Loader2 className="size-3.5 animate-spin" strokeWidth={2} />
+            ) : (
+              "Clear registry"
+            )}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export function InputsPanel({ state, onGenerate }: Props) {
   const timetableParsed = hasParsedTimetable(state);
   const outlinesParsed = hasParsedOutline(state);
@@ -208,6 +479,7 @@ export function InputsPanel({ state, onGenerate }: Props) {
 
   const dayCount = Object.keys(state.calendar.dates).length;
   const { divisions, minors } = state.calendar.cohorts;
+  const registryCount = Object.keys(state.calendar.course_registry).length;
 
   return (
     <div className="flex flex-col gap-6 rounded-xl border border-border bg-card p-6 shadow-sm">
@@ -217,6 +489,49 @@ export function InputsPanel({ state, onGenerate }: Props) {
           Upload the term timetable and course outlines to generate a schedule.
         </p>
       </div>
+
+      <section className="space-y-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Course Registry
+          </h3>
+          {registryCount > 0 && <ClearRegistryButton />}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          A standing catalog of course code → name mappings, reused every time you upload a
+          timetable — set it up once per course catalog, not once per term. Add codes below as you
+          learn them, or bulk-import a spreadsheet. Whatever's registered here is recognized
+          automatically instead of showing up in "Confirm Parsed Data."
+        </p>
+        {registryCount > 0 && (
+          <ul className="space-y-1.5">
+            {Object.entries(state.calendar.course_registry)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([abbreviation, courseName]) => (
+                <RegistryRow
+                  key={abbreviation}
+                  abbreviation={abbreviation}
+                  courseName={courseName}
+                />
+              ))}
+          </ul>
+        )}
+        <AddRegistryEntryForm />
+        <details className="group text-xs">
+          <summary className="cursor-pointer select-none font-medium text-muted-foreground hover:text-foreground">
+            Bulk import from a spreadsheet
+          </summary>
+          <div className="mt-2 space-y-1.5">
+            <p className="text-[11px] text-muted-foreground">
+              Download a template listing timetable codes that still need a name (re-download any
+              time to see just what's left unresolved), fill in each course name, and upload it
+              back.
+            </p>
+            <DownloadTemplateButtons />
+            <RegistryUploadButton />
+          </div>
+        </details>
+      </section>
 
       <section className="space-y-2.5">
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">

@@ -77,6 +77,7 @@ export interface CalendarState {
   cohorts: CohortRegistry;
   courses: CourseOutline[];
   questions: ConfirmationQuestion[];
+  course_registry: Record<string, string>;
 }
 
 export interface PendingRequest {
@@ -201,6 +202,14 @@ export interface ConfirmResult {
   state_version: number;
 }
 
+export interface CourseRegistryUploadResult {
+  summary: {
+    added_or_updated: number;
+    rows_collapsed?: string[];
+  };
+  state_version: number;
+}
+
 export interface StatusResult {
   status: string;
   state_version: number;
@@ -213,7 +222,13 @@ export interface Mirrored<T> {
 
 export const EMPTY_SESSION_STATE: SessionStateDTO = {
   session_id: SESSION_ID,
-  calendar: { dates: {}, cohorts: { divisions: [], minors: [] }, courses: [], questions: [] },
+  calendar: {
+    dates: {},
+    cohorts: { divisions: [], minors: [] },
+    courses: [],
+    questions: [],
+    course_registry: {},
+  },
   confirmation_queue: [],
   pending_request: null,
   proposal_history: [],
@@ -345,6 +360,57 @@ export async function uploadDocument(
   return requestAndMirror<UploadResult>("/upload", { method: "POST", body: form });
 }
 
+export async function uploadCourseRegistry(
+  file: File,
+): Promise<Mirrored<CourseRegistryUploadResult>> {
+  const form = new FormData();
+  form.append("file", file);
+  return requestAndMirror<CourseRegistryUploadResult>("/course-registry", {
+    method: "POST",
+    body: form,
+  });
+}
+
+export async function clearCourseRegistry(): Promise<Mirrored<StatusResult>> {
+  return requestAndMirror<StatusResult>("/course-registry", { method: "DELETE" });
+}
+
+export async function downloadCourseRegistryTemplate(
+  format: "csv" | "xlsx",
+): Promise<{ blob: Blob; filename: string }> {
+  const headers = new Headers({ "X-Session-Id": SESSION_ID });
+  const res = await fetch(`${API_BASE_URL}/api/course-registry/template?format=${format}`, {
+    headers,
+  });
+  if (!res.ok) {
+    throw new ApiError(await errorDetail(res), res.status);
+  }
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const match = /filename="?([^"]+)"?/.exec(disposition);
+  const filename = match?.[1] ?? `course_registry_template.${format}`;
+  const blob = await res.blob();
+  return { blob, filename };
+}
+
+export async function upsertCourseRegistryEntry(
+  abbreviation: string,
+  courseName: string,
+): Promise<Mirrored<StatusResult>> {
+  return requestAndMirror<StatusResult>(`/course-registry/${encodeURIComponent(abbreviation)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ course_name: courseName }),
+  });
+}
+
+export async function removeCourseRegistryEntry(
+  abbreviation: string,
+): Promise<Mirrored<StatusResult>> {
+  return requestAndMirror<StatusResult>(`/course-registry/${encodeURIComponent(abbreviation)}`, {
+    method: "DELETE",
+  });
+}
+
 export async function removeCourse(index: number): Promise<Mirrored<StatusResult>> {
   return requestAndMirror<StatusResult>(`/course/${index}`, { method: "DELETE" });
 }
@@ -417,6 +483,125 @@ export function downloadBlob(blob: Blob, filename: string): void {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+// ---------------------------------------------------------------------------
+// Developer Options (admin) API
+//
+// Deliberately separate from request()/requestAndMirror() above: admin
+// calls carry X-Admin-Token instead of X-Session-Id, and must surface a
+// 401 (wrong token) vs. 503 (server not configured) distinctly rather than
+// triggering request()'s session-mirror-restore-and-retry logic, which is
+// specific to the X-Session-Id contract and unrelated to admin auth.
+// ---------------------------------------------------------------------------
+
+const ADMIN_TOKEN_KEY = "evaluation-studio:admin-token";
+
+export function getStoredAdminToken(): string | null {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    return localStorage.getItem(ADMIN_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredAdminToken(token: string): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(ADMIN_TOKEN_KEY, token);
+  } catch {
+    // storage unavailable; token still works for the rest of this page load
+  }
+}
+
+export function clearStoredAdminToken(): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+export interface AdminSettings {
+  llm_api_key_masked: string | null;
+  llm_base_url: string;
+  model_parse: string;
+  model_narrate: string;
+  model_fallback: string;
+  extra_intent_instructions: string;
+  extra_narrate_instructions: string;
+  extra_outline_instructions: string;
+}
+
+export interface AdminSettingsUpdatePayload {
+  llm_api_key?: string;
+  llm_base_url?: string;
+  model_parse?: string;
+  model_narrate?: string;
+  model_fallback?: string;
+  extra_intent_instructions?: string;
+  extra_narrate_instructions?: string;
+  extra_outline_instructions?: string;
+}
+
+export interface AdminSettingsUpdateResult {
+  status: string;
+  changed: string[];
+}
+
+export type AdminTestStatus = "ok" | "auth_error" | "rate_limited" | "other_error";
+
+export interface AdminTestResult {
+  status: AdminTestStatus;
+  model: string;
+}
+
+async function adminRequest<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set("X-Admin-Token", token);
+  const res = await fetch(`${API_BASE_URL}/api${path}`, { ...init, headers });
+  if (!res.ok) {
+    throw new ApiError(await errorDetail(res), res.status);
+  }
+  return (await res.json()) as T;
+}
+
+export async function getAdminSettings(token: string): Promise<AdminSettings> {
+  return adminRequest<AdminSettings>("/admin/settings", token, { method: "GET" });
+}
+
+export async function updateAdminSettings(
+  token: string,
+  payload: AdminSettingsUpdatePayload,
+): Promise<AdminSettingsUpdateResult> {
+  return adminRequest<AdminSettingsUpdateResult>("/admin/settings", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function testAdminConnection(token: string): Promise<AdminTestResult> {
+  return adminRequest<AdminTestResult>("/admin/settings/test", token, { method: "POST" });
+}
+
+export async function rotateAdminToken(
+  token: string,
+  newToken: string,
+): Promise<{ status: string }> {
+  return adminRequest<{ status: string }>("/admin/token", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ new_token: newToken }),
+  });
+}
+
+export function generateRandomAdminToken(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // ---------------------------------------------------------------------------

@@ -488,41 +488,11 @@ export function downloadBlob(blob: Blob, filename: string): void {
 // ---------------------------------------------------------------------------
 // Developer Options (admin) API
 //
-// Deliberately separate from request()/requestAndMirror() above: admin
-// calls carry X-Admin-Token instead of X-Session-Id, and must surface a
-// 401 (wrong token) vs. 503 (server not configured) distinctly rather than
-// triggering request()'s session-mirror-restore-and-retry logic, which is
-// specific to the X-Session-Id contract and unrelated to admin auth.
+// Deliberately separate from request()/requestAndMirror() above: these
+// calls aren't scoped to a session (they read/write process-wide config,
+// not X-Session-Id state) and have no access gate by design -- Developer
+// Options is intentionally open, not session- or auth-scoped.
 // ---------------------------------------------------------------------------
-
-const ADMIN_TOKEN_KEY = "evaluation-studio:admin-token";
-
-export function getStoredAdminToken(): string | null {
-  if (typeof localStorage === "undefined") return null;
-  try {
-    return localStorage.getItem(ADMIN_TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setStoredAdminToken(token: string): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    localStorage.setItem(ADMIN_TOKEN_KEY, token);
-  } catch {
-    // storage unavailable; token still works for the rest of this page load
-  }
-}
-
-export function clearStoredAdminToken(): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    localStorage.removeItem(ADMIN_TOKEN_KEY);
-  } catch {
-    // ignore
-  }
-}
 
 export interface AdminSettings {
   llm_api_key_masked: string | null;
@@ -558,50 +528,30 @@ export interface AdminTestResult {
   model: string;
 }
 
-async function adminRequest<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
-  headers.set("X-Admin-Token", token);
-  const res = await fetch(`${API_BASE_URL}/api${path}`, { ...init, headers });
+async function adminRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}/api${path}`, init);
   if (!res.ok) {
     throw new ApiError(await errorDetail(res), res.status);
   }
   return (await res.json()) as T;
 }
 
-export async function getAdminSettings(token: string): Promise<AdminSettings> {
-  return adminRequest<AdminSettings>("/admin/settings", token, { method: "GET" });
+export async function getAdminSettings(): Promise<AdminSettings> {
+  return adminRequest<AdminSettings>("/admin/settings", { method: "GET" });
 }
 
 export async function updateAdminSettings(
-  token: string,
   payload: AdminSettingsUpdatePayload,
 ): Promise<AdminSettingsUpdateResult> {
-  return adminRequest<AdminSettingsUpdateResult>("/admin/settings", token, {
+  return adminRequest<AdminSettingsUpdateResult>("/admin/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 }
 
-export async function testAdminConnection(token: string): Promise<AdminTestResult> {
-  return adminRequest<AdminTestResult>("/admin/settings/test", token, { method: "POST" });
-}
-
-export async function rotateAdminToken(
-  token: string,
-  newToken: string,
-): Promise<{ status: string }> {
-  return adminRequest<{ status: string }>("/admin/token", token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ new_token: newToken }),
-  });
-}
-
-export function generateRandomAdminToken(): string {
-  const bytes = new Uint8Array(24);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+export async function testAdminConnection(): Promise<AdminTestResult> {
+  return adminRequest<AdminTestResult>("/admin/settings/test", { method: "POST" });
 }
 
 // ---------------------------------------------------------------------------

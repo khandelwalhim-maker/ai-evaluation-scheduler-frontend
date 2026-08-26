@@ -3,16 +3,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { CalendarRange, Download, Loader2, Settings2, Upload } from "lucide-react";
 import { downloadBlob, exportState, importState, type ApiError } from "@/lib/api";
-
-const items = [
-  { label: "Evaluation Scheduler", icon: CalendarRange, to: "/" as const },
-  { label: "Developer Options", icon: Settings2, to: "/developer" as const },
-];
+import { DeveloperOptionsSheet } from "./DeveloperOptionsSheet";
 
 export function AppSidebar() {
   const queryClient = useQueryClient();
   const importRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [devOptionsOpen, setDevOptionsOpen] = useState(false);
 
   const exportMutation = useMutation({
     mutationFn: exportState,
@@ -39,17 +36,23 @@ export function AppSidebar() {
         </div>
       </div>
       <nav className="flex flex-col gap-1 p-4">
-        {items.map(({ label, icon: Icon, to }) => (
-          <Link
-            key={label}
-            to={to}
-            className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[status=active]:bg-sidebar-primary data-[status=active]:text-sidebar-primary-foreground data-[status=active]:shadow-sm"
-          >
-            <Icon className="size-4" strokeWidth={2} />
-            {label}
-          </Link>
-        ))}
+        <Link
+          to="/"
+          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[status=active]:bg-sidebar-primary data-[status=active]:text-sidebar-primary-foreground data-[status=active]:shadow-sm"
+        >
+          <CalendarRange className="size-4" strokeWidth={2} />
+          Evaluation Scheduler
+        </Link>
+        <button
+          type="button"
+          onClick={() => setDevOptionsOpen(true)}
+          className="flex items-center gap-3 rounded-md px-3 py-2 text-left text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        >
+          <Settings2 className="size-4" strokeWidth={2} />
+          Developer Options
+        </button>
       </nav>
+      <DeveloperOptionsSheet open={devOptionsOpen} onOpenChange={setDevOptionsOpen} />
 
       <div className="mt-auto space-y-2 border-t border-sidebar-border px-4 py-4">
         <input

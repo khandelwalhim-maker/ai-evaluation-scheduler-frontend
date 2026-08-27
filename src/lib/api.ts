@@ -48,6 +48,11 @@ export interface TimetableEntry {
   cohort_kind: CohortKind;
   cohort_id: string | null;
   course_guess: string | null;
+  // Set once at parse time to the same value as course_guess, then never
+  // mutated -- unlike course_guess, which gets overwritten in place once
+  // identity resolves (registry or chat confirm). Anything joining on "the
+  // original code" (course_specializations lookups) must use this field.
+  course_code: string | null;
   session_numbers: number[];
   start: number | null;
   end: number | null;
@@ -78,6 +83,11 @@ export interface CalendarState {
   courses: CourseOutline[];
   questions: ConfirmationQuestion[];
   course_registry: Record<string, string>;
+  // Abbreviation -> minor specialization name (one of cohorts.minors), keyed
+  // identically to course_registry. Never holds a division letter -- a core
+  // course runs across all divisions at once, so there is no single division
+  // value to store against it; division is shown from cohort_id instead.
+  course_specializations: Record<string, string>;
 }
 
 export interface PendingRequest {
@@ -158,6 +168,7 @@ export interface ChatReply {
 export interface GridEntry {
   raw_label: string;
   course: string | null;
+  course_code: string | null;
   cohort_kind: CohortKind;
   cohort_id: string | null;
   session_numbers: number[];
@@ -228,6 +239,7 @@ export const EMPTY_SESSION_STATE: SessionStateDTO = {
     courses: [],
     questions: [],
     course_registry: {},
+    course_specializations: {},
   },
   confirmation_queue: [],
   pending_request: null,
@@ -395,11 +407,16 @@ export async function downloadCourseRegistryTemplate(
 export async function upsertCourseRegistryEntry(
   abbreviation: string,
   courseName: string,
+  specialization?: string,
 ): Promise<Mirrored<StatusResult>> {
   return requestAndMirror<StatusResult>(`/course-registry/${encodeURIComponent(abbreviation)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ course_name: courseName }),
+    // Always sending specialization (defaulting to "") rather than omitting
+    // it when absent: the backend clears on blank/omitted either way, but
+    // being explicit here matches how the UI dropdown always resubmits its
+    // full current value, never a partial update.
+    body: JSON.stringify({ course_name: courseName, specialization: specialization ?? "" }),
   });
 }
 

@@ -15,6 +15,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   clearCourseRegistry,
   clearTimetable,
   confirmQuestion,
@@ -37,6 +44,14 @@ type Props = {
   state: SessionStateDTO;
   onGenerate: () => void;
 };
+
+// Radix Select throws at runtime on <SelectItem value=""> (it reserves "" to
+// mean "no selection"), so a real sentinel stands in for "no specialization /
+// core course" inside these two components. This sentinel is the canonical
+// in-component representation everywhere -- initial state, dirty comparisons,
+// and the Select's own value -- never "". Translation to/from "" happens only
+// at the API request boundary (see the mutations below).
+const CORE_SENTINEL = "__core__";
 
 function ConfirmationItem({ question }: { question: ConfirmationQuestion }) {
   const [resolution, setResolution] = useState("");
@@ -317,13 +332,30 @@ function RegistryUploadButton() {
   );
 }
 
-function RegistryRow({ abbreviation, courseName }: { abbreviation: string; courseName: string }) {
+function RegistryRow({
+  abbreviation,
+  courseName,
+  specialization,
+  minors,
+}: {
+  abbreviation: string;
+  courseName: string;
+  specialization: string;
+  minors: string[];
+}) {
   const [name, setName] = useState(courseName);
+  // "" (no specialization) is represented as CORE_SENTINEL in here, never "" --
+  // see the constant's comment above. Initializing from the sentinel (not "")
+  // is what keeps the very first dirty comparison below from reading true on
+  // mount for an untagged row.
+  const [tag, setTag] = useState(specialization || CORE_SENTINEL);
   const queryClient = useQueryClient();
-  const dirty = name.trim() !== courseName && name.trim().length > 0;
+  const initialTag = specialization || CORE_SENTINEL;
+  const dirty = (name.trim() !== courseName && name.trim().length > 0) || tag !== initialTag;
 
   const saveMutation = useMutation({
-    mutationFn: () => upsertCourseRegistryEntry(abbreviation, name.trim()),
+    mutationFn: () =>
+      upsertCourseRegistryEntry(abbreviation, name.trim(), tag === CORE_SENTINEL ? "" : tag),
     onSuccess: ({ state }) => queryClient.setQueryData(["state"], state),
   });
 
@@ -345,6 +377,21 @@ function RegistryRow({ abbreviation, courseName }: { abbreviation: string; cours
         onChange={(e) => setName(e.target.value)}
         className="h-7 flex-1 text-xs"
       />
+      <Select value={tag} onValueChange={setTag}>
+        <SelectTrigger className="h-7 w-36 shrink-0 text-xs">
+          <SelectValue placeholder="Core" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={CORE_SENTINEL} className="text-xs">
+            Core
+          </SelectItem>
+          {minors.map((minor) => (
+            <SelectItem key={minor} value={minor} className="text-xs">
+              {minor}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       {dirty && (
         <Button
           size="sm"
@@ -372,18 +419,25 @@ function RegistryRow({ abbreviation, courseName }: { abbreviation: string; cours
   );
 }
 
-function AddRegistryEntryForm() {
+function AddRegistryEntryForm({ minors }: { minors: string[] }) {
   const [abbreviation, setAbbreviation] = useState("");
   const [name, setName] = useState("");
+  const [tag, setTag] = useState(CORE_SENTINEL);
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
-    mutationFn: () => upsertCourseRegistryEntry(abbreviation.trim(), name.trim()),
+    mutationFn: () =>
+      upsertCourseRegistryEntry(
+        abbreviation.trim(),
+        name.trim(),
+        tag === CORE_SENTINEL ? "" : tag,
+      ),
     onSuccess: ({ state }) => {
       queryClient.setQueryData(["state"], state);
       setAbbreviation("");
       setName("");
+      setTag(CORE_SENTINEL);
       setError(null);
     },
     onError: (err) => setError((err as ApiError).message ?? "Could not add that mapping"),
@@ -412,6 +466,21 @@ function AddRegistryEntryForm() {
           className="h-7 flex-1 text-xs"
           disabled={mutation.isPending}
         />
+        <Select value={tag} onValueChange={setTag} disabled={mutation.isPending}>
+          <SelectTrigger className="h-7 w-36 shrink-0 text-xs">
+            <SelectValue placeholder="Core" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={CORE_SENTINEL} className="text-xs">
+              Core
+            </SelectItem>
+            {minors.map((minor) => (
+              <SelectItem key={minor} value={minor} className="text-xs">
+                {minor}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button
           type="submit"
           size="sm"
@@ -501,7 +570,10 @@ export function InputsPanel({ state, onGenerate }: Props) {
           A standing catalog of course code → name mappings, reused every time you upload a
           timetable — set it up once per course catalog, not once per term. Add codes below as you
           learn them, or bulk-import a spreadsheet. Whatever's registered here is recognized
-          automatically instead of showing up in "Confirm Parsed Data."
+          automatically instead of showing up in "Confirm Parsed Data." Minor-elective codes can
+          also be tagged with a specialization (from the minors detected in your timetable) so the
+          Evaluation Schedule below can label them — core courses need no tag, since they already
+          show their division (A/B/C) automatically.
         </p>
         {registryCount > 0 && (
           <ul className="space-y-1.5">
@@ -512,11 +584,13 @@ export function InputsPanel({ state, onGenerate }: Props) {
                   key={abbreviation}
                   abbreviation={abbreviation}
                   courseName={courseName}
+                  specialization={state.calendar.course_specializations[abbreviation] ?? ""}
+                  minors={minors}
                 />
               ))}
           </ul>
         )}
-        <AddRegistryEntryForm />
+        <AddRegistryEntryForm minors={minors} />
         <details className="group text-xs">
           <summary className="cursor-pointer select-none font-medium text-muted-foreground hover:text-foreground">
             Bulk import from a spreadsheet

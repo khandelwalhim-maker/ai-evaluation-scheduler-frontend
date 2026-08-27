@@ -162,6 +162,7 @@ function SchedulerWorkspace() {
               isLoading={gridQuery.isLoading}
               selectedKey={selectedKey}
               onSelectAssessment={(date, entry) => setSelected({ date, entry })}
+              courseSpecializations={state.calendar.course_specializations}
             />
 
             {selected && (

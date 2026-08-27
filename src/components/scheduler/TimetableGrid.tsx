@@ -6,10 +6,32 @@ type Props = {
   isLoading: boolean;
   selectedKey: string | null;
   onSelectAssessment: (date: string, entry: GridEntry) => void;
+  courseSpecializations: Record<string, string>;
 };
 
 export function entryKey(date: string, entry: GridEntry): string {
   return `${date}|${entry.raw_label}|${entry.start ?? "?"}`;
+}
+
+// The badge that explains *why* the same course code recurs several times a
+// day: a division letter for core courses (always shown, straight from the
+// parser -- no registry involvement), or a minor specialization for minor
+// courses (from the course registry's per-abbreviation tag, falling back to
+// the raw parsed cohort label before that tag is set). Division and minor are
+// mutually exclusive cohort_kind values, so an entry only ever needs one.
+function cohortBadge(entry: GridEntry, courseSpecializations: Record<string, string>): string | null {
+  if (entry.cohort_kind === "division") {
+    return entry.cohort_id ? `Div ${entry.cohort_id}` : null;
+  }
+  if (entry.cohort_kind === "minor") {
+    // Defensive normalization at the join site -- the backend's extraction
+    // regex already guarantees course_code is upper-case with no whitespace,
+    // but the lookup must not silently depend on that holding forever across
+    // the network boundary.
+    const key = entry.course_code?.trim().toUpperCase() ?? "";
+    return courseSpecializations[key] ?? entry.cohort_id ?? null;
+  }
+  return null;
 }
 
 type Row = { kind: "class" | "assessment"; entry: GridEntry };
@@ -22,7 +44,13 @@ function rowsFor(day: GridDay): Row[] {
   return rows.sort((a, b) => (a.entry.start ?? 0) - (b.entry.start ?? 0));
 }
 
-export function TimetableGrid({ grid, isLoading, selectedKey, onSelectAssessment }: Props) {
+export function TimetableGrid({
+  grid,
+  isLoading,
+  selectedKey,
+  onSelectAssessment,
+  courseSpecializations,
+}: Props) {
   if (isLoading && !grid) {
     return (
       <div className="rounded-lg border border-dashed border-border bg-muted/20 p-8 text-center text-xs text-muted-foreground">
@@ -84,6 +112,7 @@ export function TimetableGrid({ grid, isLoading, selectedKey, onSelectAssessment
                   const reactKey = `${day.date}-${row.kind}-${index}`;
                   const selectionId = entryKey(day.date, row.entry);
                   const { start, end } = row.entry;
+                  const badge = cohortBadge(row.entry, courseSpecializations);
                   if (row.kind === "assessment") {
                     const selected = selectionId === selectedKey;
                     return (
@@ -109,6 +138,11 @@ export function TimetableGrid({ grid, isLoading, selectedKey, onSelectAssessment
                             {formatWindow(start, end)}
                           </div>
                         )}
+                        {badge && (
+                          <div className="mt-0.5 inline-block truncate rounded-sm bg-eval-fg/10 px-1 py-0.5 text-[9px] font-semibold text-eval-fg/80">
+                            {badge}
+                          </div>
+                        )}
                       </button>
                     );
                   }
@@ -123,6 +157,11 @@ export function TimetableGrid({ grid, isLoading, selectedKey, onSelectAssessment
                       {start != null && end != null && (
                         <div className="truncate text-[10px] font-medium text-class-fg/70">
                           {formatWindow(start, end)}
+                        </div>
+                      )}
+                      {badge && (
+                        <div className="mt-0.5 inline-block truncate rounded-sm bg-class-fg/10 px-1 py-0.5 text-[9px] font-semibold text-class-fg/80">
+                          {badge}
                         </div>
                       )}
                     </div>

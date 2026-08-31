@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Download, FileText, Loader2, Plus, Trash2, Upload, X } from "lucide-react";
+import { Check, Circle, Download, FileText, Loader2, Plus, Trash2, Upload, X } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -352,6 +352,13 @@ function RegistryRow({
   const queryClient = useQueryClient();
   const initialTag = specialization || CORE_SENTINEL;
   const dirty = (name.trim() !== courseName && name.trim().length > 0) || tag !== initialTag;
+  // A previously-saved specialization can fall out of the live minors list
+  // (timetable cleared, or re-uploaded without that label) -- without this,
+  // the trigger would render blank for a value that's still genuinely saved,
+  // reading as if the tag silently disappeared.
+  const selectableMinors = specialization && !minors.includes(specialization)
+    ? [specialization, ...minors]
+    : minors;
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -385,7 +392,7 @@ function RegistryRow({
           <SelectItem value={CORE_SENTINEL} className="text-xs">
             Core
           </SelectItem>
-          {minors.map((minor) => (
+          {selectableMinors.map((minor) => (
             <SelectItem key={minor} value={minor} className="text-xs">
               {minor}
             </SelectItem>
@@ -500,6 +507,14 @@ function AddRegistryEntryForm({ minors }: { minors: string[] }) {
   );
 }
 
+function StatusIcon({ done }: { done: boolean }) {
+  return done ? (
+    <Check className="size-3.5 shrink-0 text-primary" strokeWidth={2.5} />
+  ) : (
+    <Circle className="size-3.5 shrink-0 text-muted-foreground/40" strokeWidth={2.5} />
+  );
+}
+
 function ClearRegistryButton() {
   const queryClient = useQueryClient();
   const mutation = useMutation({
@@ -550,6 +565,12 @@ export function InputsPanel({ state, onGenerate }: Props) {
   const { divisions, minors } = state.calendar.cohorts;
   const registryCount = Object.keys(state.calendar.course_registry).length;
 
+  const missingForGenerate = [
+    !timetableParsed && "a term timetable",
+    !outlinesParsed && "course outlines",
+  ].filter((part): part is string => Boolean(part));
+  const generateHint = ready ? undefined : `Upload ${missingForGenerate.join(" and ")} to generate a schedule.`;
+
   return (
     <div className="flex flex-col gap-6 rounded-xl border border-border bg-card p-6 shadow-sm">
       <div>
@@ -558,6 +579,32 @@ export function InputsPanel({ state, onGenerate }: Props) {
           Upload the term timetable and course outlines to generate a schedule.
         </p>
       </div>
+
+      <section className="space-y-2.5">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Term Timetable
+        </h3>
+        <p className="text-xs text-muted-foreground">
+          Upload the finalized term timetable PDF. Multiple files (for example one per week) are
+          merged automatically. Start here — it's what detects the divisions and minor cohorts the
+          Course Registry below can tag.
+        </p>
+        {timetableParsed && (
+          <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/60 px-3.5 py-2.5">
+            <Check className="size-4 text-success" strokeWidth={2.5} />
+            <p className="text-xs font-semibold">
+              {dayCount} day{dayCount === 1 ? "" : "s"} processed
+            </p>
+            <div className="ml-auto">
+              <ClearTimetableButton />
+            </div>
+          </div>
+        )}
+        <UploadButton
+          kind="timetable"
+          label={timetableParsed ? "Upload More" : "Upload Timetable"}
+        />
+      </section>
 
       <section className="space-y-2.5">
         <div className="flex items-center justify-between gap-2">
@@ -575,6 +622,12 @@ export function InputsPanel({ state, onGenerate }: Props) {
           Evaluation Schedule below can label them — core courses need no tag, since they already
           show their division (A/B/C) automatically.
         </p>
+        {minors.length === 0 && (
+          <p className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+            No minors detected yet, so specialization tagging isn't available below — upload the
+            term timetable above first. Course name mappings work either way.
+          </p>
+        )}
         {registryCount > 0 && (
           <ul className="space-y-1.5">
             {Object.entries(state.calendar.course_registry)
@@ -605,31 +658,6 @@ export function InputsPanel({ state, onGenerate }: Props) {
             <RegistryUploadButton />
           </div>
         </details>
-      </section>
-
-      <section className="space-y-2.5">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Term Timetable
-        </h3>
-        <p className="text-xs text-muted-foreground">
-          Upload the finalized term timetable PDF. Multiple files (for example one per week) are
-          merged automatically.
-        </p>
-        {timetableParsed && (
-          <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/60 px-3.5 py-2.5">
-            <Check className="size-4 text-success" strokeWidth={2.5} />
-            <p className="text-xs font-semibold">
-              {dayCount} day{dayCount === 1 ? "" : "s"} processed
-            </p>
-            <div className="ml-auto">
-              <ClearTimetableButton />
-            </div>
-          </div>
-        )}
-        <UploadButton
-          kind="timetable"
-          label={timetableParsed ? "Upload More" : "Upload Timetable"}
-        />
       </section>
 
       <section className="space-y-2.5">
@@ -670,7 +698,7 @@ export function InputsPanel({ state, onGenerate }: Props) {
         <h3 className="text-xs font-semibold text-foreground">Scheduling Constraints</h3>
         <ul className="space-y-2 text-xs text-muted-foreground">
           <li className="flex items-center gap-2.5">
-            <Check className="size-3.5 text-primary" strokeWidth={2.5} />
+            <StatusIcon done={dayCount > 0} />
             <span className="font-medium">
               {dayCount > 0
                 ? `${dayCount} timetable day${dayCount === 1 ? "" : "s"} loaded`
@@ -678,7 +706,7 @@ export function InputsPanel({ state, onGenerate }: Props) {
             </span>
           </li>
           <li className="flex items-center gap-2.5">
-            <Check className="size-3.5 text-primary" strokeWidth={2.5} />
+            <StatusIcon done={divisions.length > 0} />
             <span className="font-medium">
               {divisions.length > 0
                 ? `Divisions: ${divisions.join(", ")}`
@@ -686,13 +714,13 @@ export function InputsPanel({ state, onGenerate }: Props) {
             </span>
           </li>
           <li className="flex items-center gap-2.5">
-            <Check className="size-3.5 text-primary" strokeWidth={2.5} />
+            <StatusIcon done={minors.length > 0} />
             <span className="font-medium">
               {minors.length > 0 ? `Minors: ${minors.join(", ")}` : "No minor cohorts detected yet"}
             </span>
           </li>
           <li className="flex items-center gap-2.5">
-            <Check className="size-3.5 text-primary" strokeWidth={2.5} />
+            <StatusIcon done={state.calendar.courses.length > 0} />
             <span className="font-medium">
               {state.calendar.courses.length} course outline
               {state.calendar.courses.length === 1 ? "" : "s"} parsed
@@ -702,7 +730,12 @@ export function InputsPanel({ state, onGenerate }: Props) {
       </section>
 
       <div className="pt-1">
-        <Button className="w-full shadow-sm" disabled={!ready} onClick={onGenerate}>
+        <Button
+          className="w-full shadow-sm"
+          disabled={!ready}
+          onClick={onGenerate}
+          title={generateHint}
+        >
           Generate Evaluation Schedule
         </Button>
       </div>
